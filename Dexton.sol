@@ -175,6 +175,7 @@ contract DEXTON is IERC20, Ownable(msg.sender) {
     if(_rewards[msg.sender] > 0) {
       _transfer(address(this), msg.sender, _rewards[msg.sender]);
       ++_months[msg.sender];
+      _rewards[msg.sender] = 0;
     }
   }
 
