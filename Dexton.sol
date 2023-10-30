@@ -29,14 +29,13 @@ contract DEXTON is IERC20, Ownable(msg.sender) {
   address public usdtAddress;
   address[] depositors;
   uint256 _totalSupply;
-  uint256 _lockedTokensForYear;
+  uint256 _lockedTokensForSixMonth;
   uint256 _rewardTokens;
   uint256 _tokensForPresale;
   uint256 public startTimestamp;
   uint32 tokenPriceInETH;
   uint32 tokenPriceInUSDT;
   uint8 interestOnDeposit;
-  uint8 salesTax;
   uint8 public decimals;
   string public symbol;
   string public name;
@@ -47,13 +46,12 @@ contract DEXTON is IERC20, Ownable(msg.sender) {
   constructor() {
     name = "DEXTON";
     symbol = "DEXTON";
-    salesTax = 5;
     decimals = 18;
     _totalSupply = 1000000000;
     interestOnDeposit = 10;
     startTimestamp = block.timestamp;
     _tokensForPresale = _totalSupply.div(20); 
-    _lockedTokensForYear = _totalSupply.mul(2).div(10);
+    _lockedTokensForSixMonth = _totalSupply.div(10);
     _rewardTokens = _totalSupply.div(10);
     _balances[TEAM_WALLET] = _totalSupply.div(2);
     _balances[address(this)] = _rewardTokens;
@@ -97,16 +95,6 @@ contract DEXTON is IERC20, Ownable(msg.sender) {
 
   function decreaseAllowance(address _spender, uint256 _subtractedValue) public returns (bool) {
     _approve(msg.sender, _spender, _allowances[msg.sender][_spender].sub(_subtractedValue, "DEXTON: decreased allowance below zero"));
-    return true;
-  }
-
-  function mint(uint256 amount) public onlyOwner returns (bool) {
-    _mint(msg.sender, amount);
-    return true;
-  }
- 
-  function burn(uint256 _amount) public returns (bool) {
-    _burn(msg.sender, _amount);
     return true;
   }
 
@@ -175,13 +163,12 @@ contract DEXTON is IERC20, Ownable(msg.sender) {
     if(_rewards[msg.sender] > 0) {
       _transfer(address(this), msg.sender, _rewards[msg.sender]);
       ++_months[msg.sender];
-      _rewards[msg.sender] = 0;
     }
   }
 
   function unlockTokens() external onlyOwner {
-    require(startTimestamp + 365 days > block.timestamp, "DEXTON: cann't unlock");
-    _balances[TEAM_WALLET] += _lockedTokensForYear;
+    require(startTimestamp + 180 days > block.timestamp, "DEXTON: cann't unlock");
+    _balances[TEAM_WALLET] += _lockedTokensForSixMonth;
     startTimestamp = block.timestamp;
     emit Transfer(address(0), TEAM_WALLET, _totalSupply.div(2));
   }
@@ -196,33 +183,12 @@ contract DEXTON is IERC20, Ownable(msg.sender) {
     emit Transfer(_sender, _recipient, _amount);
   }
 
-  function _mint(address account, uint256 _amount) internal {
-    require(account != address(0), "DEXTON: mint to the zero address");
-
-    _totalSupply = _totalSupply.add(_amount);
-    _balances[account] = _balances[account].add(_amount);
-    emit Transfer(address(0), account, _amount);
-  }
-
-  function _burn(address account, uint256 _amount) internal {
-    require(account != address(0), "DEXTON: burn from the zero address");
-
-    _balances[account] = _balances[account].sub(_amount, "DEXTON: burn amount exceeds balance");
-    _totalSupply = _totalSupply.sub(_amount);
-    emit Transfer(account, address(0), _amount);
-  }
-
   function _approve(address _owner, address _spender, uint256 _amount) internal {
     require(_owner != address(0), "DEXTON: approve from the zero address");
     require(_spender != address(0), "DEXTON: approve to the zero address");
 
     _allowances[_owner][_spender] = _amount;
     emit Approval(_owner, _spender, _amount);
-  }
-
-  function _burnFrom(address account, uint256 _amount) internal {
-    _burn(account, _amount);
-    _approve(account, msg.sender, _allowances[account][msg.sender].sub(_amount, "DEXTON: burn amount exceeds allowance"));
   }
 
   function _freezeTokens(address _user, uint256 _amount) private {
