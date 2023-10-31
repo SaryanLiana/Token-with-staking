@@ -4,7 +4,6 @@ pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/interfaces/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 
 interface IUSDT {
     function transferFrom(address _from, address _to, uint _value) external;
@@ -13,11 +12,10 @@ interface IUSDT {
 }
 
 contract DEXTON is IERC20, Ownable(msg.sender) {
-  using SafeMath for uint256;
 
-  mapping (address => uint256) _balances;
-  mapping (address => uint256) _rewards;
-  mapping(address => uint256) _possessionTime;
+  mapping(address => uint256) public possessionTime;
+  mapping(address => uint256) _balances;
+  mapping(address => uint256) _rewards;
   mapping(address => uint256) _depositedTime;
   mapping(address => uint256) _frozenBalances;
   mapping(address => uint8) _months;
@@ -29,12 +27,13 @@ contract DEXTON is IERC20, Ownable(msg.sender) {
   address public usdtAddress;
   address[] depositors;
   uint256 _totalSupply;
+  uint256 _maxSupply;
   uint256 _lockedTokensForSixMonth;
   uint256 _rewardTokens;
   uint256 _tokensForPresale;
   uint256 public startTimestamp;
-  uint32 tokenPriceInETH;
-  uint32 tokenPriceInUSDT;
+  uint256 tokenPriceInETH;
+  uint256 tokenPriceInUSDT;
   uint8 interestOnDeposit;
   uint8 public decimals;
   string public symbol;
@@ -43,29 +42,33 @@ contract DEXTON is IERC20, Ownable(msg.sender) {
   event DEPOSIT(address sender, uint256 amount);
   event PRESALED(address buyer, uint256 amount);
 
-  constructor() {
+  constructor(address _usdtAddress, uint256 _tokenPriceInETH, uint256 _tokenPriceInUSDT) {
     name = "DEXTON";
     symbol = "DEXTON";
     decimals = 18;
     _totalSupply = 1000000000;
+    _maxSupply = _totalSupply;
+    usdtAddress = _usdtAddress;
+    tokenPriceInETH = _tokenPriceInETH;
+    tokenPriceInUSDT = _tokenPriceInUSDT;
     interestOnDeposit = 10;
     startTimestamp = block.timestamp;
-    _tokensForPresale = _totalSupply.div(20); 
-    _lockedTokensForSixMonth = _totalSupply.div(10);
-    _rewardTokens = _totalSupply.div(10);
-    _balances[TEAM_WALLET] = _totalSupply.div(2);
+    _tokensForPresale = _totalSupply / 20; 
+    _lockedTokensForSixMonth = _totalSupply / 10;
+    _rewardTokens = _totalSupply / 10;
+    _balances[TEAM_WALLET] = _totalSupply / 2;
     _balances[address(this)] = _rewardTokens;
 
     emit Transfer(address(0), address(this), _rewardTokens);
-    emit Transfer(address(0), TEAM_WALLET, _totalSupply.div(2));
+    emit Transfer(address(0), TEAM_WALLET, _totalSupply/2);
   }
 
   function totalSupply() external view returns (uint256) {
     return _totalSupply;
   }
 
-  function balanceOf(address account) external view returns (uint256) {
-    return _balances[account];
+  function balanceOf(address _account) external view returns (uint256) {
+    return _balances[_account];
   }
 
   function allowance(address _owner, address _spender) external view returns (uint256) {
@@ -83,34 +86,37 @@ contract DEXTON is IERC20, Ownable(msg.sender) {
   }
 
   function transferFrom(address _sender, address _recipient, uint256 _amount) external returns (bool) {
+    require(_allowances[_sender][msg.sender] - _amount > 0, "DEXTON: transfer amount exceeds allowance");
+
     _transfer(_sender, _recipient, _amount);
-    _approve(_sender, msg.sender, _allowances[_sender][msg.sender].sub(_amount, "DEXTON: transfer amount exceeds allowance"));
+    _approve(_sender, msg.sender, _allowances[_sender][msg.sender] - _amount);
+    return true;
+  }
+
+  function burn(uint256 _amount) public returns (bool) {
+    _burn(msg.sender, _amount);
     return true;
   }
 
   function increaseAllowance(address _spender, uint256 _addedValue) public returns (bool) {
-    _approve(msg.sender, _spender, _allowances[msg.sender][_spender].add(_addedValue));
+    _approve(msg.sender, _spender, _allowances[msg.sender][_spender] + _addedValue);
     return true;
   }
 
   function decreaseAllowance(address _spender, uint256 _subtractedValue) public returns (bool) {
-    _approve(msg.sender, _spender, _allowances[msg.sender][_spender].sub(_subtractedValue, "DEXTON: decreased allowance below zero"));
+    _approve(msg.sender, _spender, _allowances[msg.sender][_spender] - _subtractedValue);
     return true;
   }
 
-  function setUsdtAddress(address _usdtAddress) public onlyOwner {
-    usdtAddress = _usdtAddress;
-  }
-
   function buyTokensByPresale(uint256 _amount) payable public {
-    require(_tokensForPresale.sub(_amount) >= 0, "DEXTON: presale finished");
+    require(_tokensForPresale - _amount >= 0, "DEXTON: presale finished");
 
     if(msg.value > 0) {
-      require(msg.value >= _amount.mul(tokenPriceInETH), "DEXTON: insufficient eth for buying tokens");
+      require(msg.value >= _amount * tokenPriceInETH, "DEXTON: insufficient eth for buying tokens");
       require((msg.sender).balance >= msg.value, "DEXTON: insufficient user eth balance!");
 
-      uint256 amountToReturn = msg.value.sub((_amount.mul(tokenPriceInETH))); 
-      uint256 amountToTransfer = msg.value.sub(amountToReturn);
+      uint256 amountToReturn = msg.value - (_amount * tokenPriceInETH); 
+      uint256 amountToTransfer = msg.value - amountToReturn;
 
       if(amountToReturn > 0) {
         payable(msg.sender).transfer(amountToReturn);
@@ -126,7 +132,7 @@ contract DEXTON is IERC20, Ownable(msg.sender) {
 
     _transfer(TEAM_WALLET, msg.sender, _amount);
     _tokensForPresale -= _amount;
-    _possessionTime[msg.sender] = block.timestamp;
+    possessionTime[msg.sender] = block.timestamp;
     emit PRESALED(msg.sender, _amount);
 
   }
@@ -144,12 +150,11 @@ contract DEXTON is IERC20, Ownable(msg.sender) {
     emit DEPOSIT(msg.sender, _amount);
   }
 
-  function withdraw() external onlyOwner {
-    if(_balances[address(this)] == 0) {
-      uint256 depositorsLength = depositors.length;
-      for(uint256 i; i < depositorsLength; ++i) {
-        _unfreezeTokens(depositors[i], _frozenBalances[depositors[i]]);
-      }
+  function withdraw() external {
+    require(_balances[address(this)] == 0, " DEXTON: can not unfreeze tokens");
+    uint256 depositorsLength = depositors.length;
+    for(uint256 i; i < depositorsLength; ++i) {
+      _unfreezeTokens(depositors[i], _frozenBalances[depositors[i]]);
     }
   }
 
@@ -170,17 +175,26 @@ contract DEXTON is IERC20, Ownable(msg.sender) {
     require(startTimestamp + 180 days > block.timestamp, "DEXTON: cann't unlock");
     _balances[TEAM_WALLET] += _lockedTokensForSixMonth;
     startTimestamp = block.timestamp;
-    emit Transfer(address(0), TEAM_WALLET, _totalSupply.div(2));
+    emit Transfer(address(0), TEAM_WALLET, _totalSupply / 2);
   }
 
   function _transfer(address _sender, address _recipient, uint256 _amount) internal {
-    require(_balances[_sender].sub(_frozenBalances[_sender]) >= _amount, "DEXTON: insufficient token balance");
+    require(_balances[_sender] - _frozenBalances[_sender] >= _amount, "DEXTON: insufficient token balance");
     require(_sender != address(0), "DEXTON: transfer from the zero address");
     require(_recipient != address(0), "DEXTON: transfer to the zero address");
 
-    _balances[_sender] = _balances[_sender].sub(_amount, "DEXTON: transfer amount exceeds balance");
-    _balances[_recipient] = _balances[_recipient].add(_amount);
+    _balances[_sender] = _balances[_sender] - _amount;
+    _balances[_recipient] = _balances[_recipient] + _amount;
     emit Transfer(_sender, _recipient, _amount);
+  }
+
+  function _burn(address _account, uint256 _amount) internal {
+    require(_account != address(0), "DEXTON: burn from the zero address");
+    require(_balances[_account] > 0, "DEXTON: transfer amount exceeds allowance");
+
+    _balances[_account] = _balances[_account] - _amount;
+    _totalSupply = _totalSupply - _amount;
+    emit Transfer(_account, address(0), _amount);
   }
 
   function _approve(address _owner, address _spender, uint256 _amount) internal {
@@ -204,7 +218,7 @@ contract DEXTON is IERC20, Ownable(msg.sender) {
   }
 
   function update() private {
-    uint256 rewardAmount = (block.timestamp.sub(_depositedTime[msg.sender])).div(1 days).mul(_frozenBalances[msg.sender]).div(30 days).div(120);
+    uint256 rewardAmount = ((block.timestamp - _depositedTime[msg.sender]) / 1 days) * (_frozenBalances[msg.sender]) / 30 days / interestOnDeposit / 12;
     _rewards[msg.sender] += rewardAmount;
     _depositedTime[msg.sender] = block.timestamp;
   }
