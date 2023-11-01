@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-pragma solidity ^0.8.19;
+pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/interfaces/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
@@ -14,10 +14,10 @@ interface IUSDT {
 contract DEXTON is IERC20, Ownable(msg.sender) {
 
   mapping(address => uint256) public possessionTime;
+  mapping(address => uint256) public _frozenBalances;
   mapping(address => uint256) _balances;
   mapping(address => uint256) _rewards;
   mapping(address => uint256) _depositedTime;
-  mapping(address => uint256) _frozenBalances;
   mapping(address => uint8) _months;
   mapping(address => bool) _isDepositor;
 
@@ -26,14 +26,13 @@ contract DEXTON is IERC20, Ownable(msg.sender) {
   address constant TEAM_WALLET = 0x88a6BCc5e06Fb3150a596392afEF3d4e1188471c;
   address public usdtAddress;
   address[] depositors;
+  uint256 public startTimestamp;
+  uint256 public tokenPriceInUSDT;
+  uint256 public maxSupply;
   uint256 _totalSupply;
-  uint256 _maxSupply;
   uint256 _lockedTokensForSixMonth;
   uint256 _rewardTokens;
   uint256 _tokensForPresale;
-  uint256 public startTimestamp;
-  uint256 tokenPriceInETH;
-  uint256 tokenPriceInUSDT;
   uint8 interestOnDeposit;
   uint8 public decimals;
   string public symbol;
@@ -42,15 +41,14 @@ contract DEXTON is IERC20, Ownable(msg.sender) {
   event DEPOSIT(address sender, uint256 amount);
   event PRESALED(address buyer, uint256 amount);
 
-  constructor(address _usdtAddress, uint256 _tokenPriceInETH, uint256 _tokenPriceInUSDT) {
+  constructor() {
     name = "DEXTON";
     symbol = "DEXTON";
     decimals = 18;
-    _totalSupply = 1000000000;
-    _maxSupply = _totalSupply;
-    usdtAddress = _usdtAddress;
-    tokenPriceInETH = _tokenPriceInETH;
-    tokenPriceInUSDT = _tokenPriceInUSDT;
+    _totalSupply = 1000000000 * 1e18;
+    maxSupply = _totalSupply;
+    usdtAddress = 0xdAC17F958D2ee523a2206206994597C13D831ec7;
+    tokenPriceInUSDT = 1000000000000000;
     interestOnDeposit = 10;
     startTimestamp = block.timestamp;
     _tokensForPresale = _totalSupply / 20; 
@@ -108,41 +106,24 @@ contract DEXTON is IERC20, Ownable(msg.sender) {
     return true;
   }
 
-  function buyTokensByPresale(uint256 _amount) payable public {
-    require(_tokensForPresale - _amount >= 0, "DEXTON: presale finished");
+  function buyTokensByPresale(uint256 _amount) public {
+    require(_tokensForPresale - _amount * 1e18 >= 0, "DEXTON: presale finished");
+    require(IUSDT(usdtAddress).allowance(msg.sender, address(this)) >= tokenPriceInUSDT * _amount, "DEXTON: User has not given enough allowance"); //Checking Allowance in USDT Contract
+    require(IUSDT(usdtAddress).balanceOf(msg.sender) >= tokenPriceInUSDT * _amount, "DEXTON: Insufficient user token balance");
 
-    if(msg.value > 0) {
-      require(msg.value >= _amount * tokenPriceInETH, "DEXTON: insufficient eth for buying tokens");
-      require((msg.sender).balance >= msg.value, "DEXTON: insufficient user eth balance!");
-
-      uint256 amountToReturn = msg.value - (_amount * tokenPriceInETH); 
-      uint256 amountToTransfer = msg.value - amountToReturn;
-
-      if(amountToReturn > 0) {
-        payable(msg.sender).transfer(amountToReturn);
-      }
-      payable(TEAM_WALLET).transfer(amountToTransfer);
-    }
-    else {
-      require(IUSDT(usdtAddress).allowance(msg.sender, address(this)) >= tokenPriceInUSDT * _amount, "DEXTON: User has not given enough allowance"); //Checking Allowance in USDT Contract
-      require(IUSDT(usdtAddress).balanceOf(msg.sender) >= tokenPriceInUSDT * _amount, "DEXTON: Insufficient user token balance");
-
-      IUSDT(usdtAddress).transferFrom(msg.sender, TEAM_WALLET, _amount * tokenPriceInUSDT);
-    }
-
-    _transfer(TEAM_WALLET, msg.sender, _amount);
-    _tokensForPresale -= _amount;
+    IUSDT(usdtAddress).transferFrom(msg.sender, TEAM_WALLET, _amount * tokenPriceInUSDT);
+    _transfer(TEAM_WALLET, msg.sender, _amount * 1e18);
+    _tokensForPresale -= _amount * 1e18;
     possessionTime[msg.sender] = block.timestamp;
     emit PRESALED(msg.sender, _amount);
-
   }
 
   function deposit(uint256 _amount) external {
     require(_balances[address(this)] > 0, "DEXTON: cann't deposit");
-    require(_balances[msg.sender] >= _amount, "DEXTON: insufficient token balance");
+    require(_balances[msg.sender] >= _amount * 1e18, "DEXTON: insufficient token balance");
     
     update();
-    _freezeTokens(msg.sender, _amount); 
+    _freezeTokens(msg.sender, _amount * 1e18); 
     if (_isDepositor[msg.sender] == false) {
       _isDepositor[msg.sender] == true;
       depositors.push(msg.sender);
@@ -151,7 +132,7 @@ contract DEXTON is IERC20, Ownable(msg.sender) {
   }
 
   function withdraw() external {
-    require(_balances[address(this)] == 0, " DEXTON: can not unfreeze tokens");
+    require(_balances[address(this)] < 1e17, "DEXTON: can not unfreeze tokens");
     uint256 depositorsLength = depositors.length;
     for(uint256 i; i < depositorsLength; ++i) {
       _unfreezeTokens(depositors[i], _frozenBalances[depositors[i]]);
@@ -159,7 +140,7 @@ contract DEXTON is IERC20, Ownable(msg.sender) {
   }
 
   function claim() external {
-    require(_isDepositor[msg.sender] == true, " DEXTON: you are not a depositor");
+    require(_isDepositor[msg.sender] == true, "DEXTON: you are not a depositor");
     require(_balances[address(this)] != 0, "DEXTON: cann't claim");
     require(_depositedTime[msg.sender] + 30 days > block.timestamp, "DEXTON: not time for claim");
     require(_months[msg.sender] <= 12, "DEXTON: deposit time was expired");
@@ -218,7 +199,7 @@ contract DEXTON is IERC20, Ownable(msg.sender) {
   }
 
   function update() private {
-    uint256 rewardAmount = ((block.timestamp - _depositedTime[msg.sender]) / 1 days) * (_frozenBalances[msg.sender]) / 30 days / interestOnDeposit / 12;
+    uint256 rewardAmount = ((block.timestamp - _depositedTime[msg.sender]) / 1 days) * (_frozenBalances[msg.sender]) / 30 / interestOnDeposit / 12;
     _rewards[msg.sender] += rewardAmount;
     _depositedTime[msg.sender] = block.timestamp;
   }
